@@ -1,0 +1,17 @@
+{
+  "name": "noteblock-orchestra",
+  "version": "1.0.0",
+  "description": "Generate Minecraft (Bedrock) Noteblock music from MIDI files.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "hjstn",
+  "license": "MIT",
+  "dependencies": {
+    "@tonejs/midi": "^2.0.22",
+    "adm-zip": "^0.4.14",
+    "uuid": "^7.0.3",
+    "yargs": "^15.3.1"
+  }
+}
