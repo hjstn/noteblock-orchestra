@@ -2,12 +2,11 @@
 
 // Minecraft "ok" pitch range: 0.1 to 6
 
-const PITCH_MIN = 0.1;
-const PITCH_MAX = 6;
-
 const INSTR_ROUND_OFF = 5;
 const TIMER_TAG = 'music';
-const TICK_RATE = 20;
+
+// Actual tick rate is 20, but 18 makes it play a bit faster.
+const TICK_RATE = 18;
 
 // Modules
 
@@ -56,7 +55,7 @@ function midiToPitch(midi) {
 
     // Above octave 96, repitch down
     if (midi > 96) {
-        midi = 84 + (midi * 12);
+        midi = 84 + (midi % 12);
         repitched++;
     }
 
