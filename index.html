@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <title>Noteblock Orchestra</title>
+
+    <script src="https://unpkg.com/@tonejs/midi"></script>
+    <script src="https://unpkg.com/jszip@latest/dist/jszip.min.js"></script>
+    <script src="https://unpkg.com/uuid@latest/dist/umd/uuidv4.min.js"></script>
+    <script src="https://unpkg.com/file-saver@latest/dist/FileSaver.min.js"></script>
+
+    <!-- UIkit CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uikit@3.3.3/dist/css/uikit.min.css" />
+
+    <!-- UIkit JS -->
+    <script src="https://cdn.jsdelivr.net/npm/uikit@3.3.3/dist/js/uikit.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/uikit@3.3.3/dist/js/uikit-icons.min.js"></script>
+</head>
+<body>
+    <nav class="uk-navbar-container" uk-navbar>
+        <div class="uk-padding-large uk-padding-remove-vertical"></div>
+            <a class="uk-navbar-item uk-logo" href="/"><b>JH</b></a>
+
+            <ul class="uk-navbar-nav">
+                <li>
+                    <a href="https://github.com/hjstn/">
+                        <span class="uk-icon uk-margin-small-right" uk-icon="github"></span>
+                        GitHub
+                    </a>
+                </li>
+            </ul>
+        </div>
+
+        <div class="uk-navbar-right">
+            <ul class="uk-navbar-nav">
+                <li class=""><a href="#">About</a></li>
+                <li class="uk-active">
+                    <a href="#">Projects</a>
+                    <div class="uk-navbar-dropdown">
+                        <ul class="uk-nav uk-navbar-dropdown-nav">
+                            <li><a href="/projects/rder">Rder</a></li>
+                            <li><a href="/projects/nbo">Noteblock Orchestra</a></li>
+                        </ul>
+                    </div>
+                </li>
+            </ul>
+        </div>
+
+        <div class="uk-padding-large uk-padding-remove-vertical"></div>
+    </nav>
+    <div class="uk-section">
+        <div class="uk-container">
+            <h2>Project: <b>Noteblock Orchestra</b></h2>
+
+            <div>
+                <form id="music-form" class="uk-form-stacked">
+                    <div class="uk-margin" uk-margin>
+                        <label class="uk-form-label" for="music-name">Name</label>
+                        <div class="uk-form-controls">
+                            <input class="uk-input" id="music-name" name="music-name" type="text" placeholder="Music">
+                        </div>
+                    </div>
+
+                    <div class="uk-margin" uk-margin>
+                        <div uk-form-custom="target: true">
+                            <label class="uk-form-label" for="music-file">MIDI</label>
+                            <input id="music-file" name="music-file" type="file" accept=".mid">
+                            <input class="uk-input" type="text" placeholder="Select .mid file" disabled>
+                        </div>
+                    </div>
+
+                    <input id="music-submit" type="submit" class="uk-button uk-button-default" disabled></input>
+                </form>
+
+                <br>
+
+                <a href="static/NBO Base.mcpack" download><button class="uk-button uk-button-default">Download NBO Base</button></a>
+
+                <span id="music-results"></span>
+            </div>
+
+            <div>
+                <h3>What?</h3>
+                <p>It's a tool to generate Minecraft (Bedrock) music from MIDI files.</p>
+                
+                <h3>How do I use it?</h3>
+                <p>
+                    1. Generate the music MCPack.<br>
+                    2. Download the <b>NBO Base</b> MCPack.<br>
+                    3. Open both MCPacks to import them to Minecraft.<br>
+                    4. Add both behavior packs to your world (NBO Base, and your music MCPack).<br>
+                    5. In the world, run <i>/function NBO/Init</i> to initialize (you also can run this later to reset).<br>
+                    6. Spawn a repeating command block with the command <i>/function NBO/Loop</i><br>
+                    7. For each part your track is split into, spawn a repeating command block with the commands <i>/function NBO_<b>SongNameHere</b>/<b>PartNumberHere</b></i>.<br>
+                        (note: part number starts from 1 onwards)
+                    8. Activate both command blocks.<br>
+                <p>
+
+                <h3>How?</h3>
+                <p>
+                    The program converts MIDI notes to Noteblock sounds with the appropriate pitch and volume (velocity of MIDI), repitching it as necessary.<br>
+                    It uses a scoreboard objective <i>music</i> to keep track of each player's current play position.<br>
+                    Then, the playsound commands are executed with scoreboard selectors for specific times to play the song.<br>
+                <p>
+
+                <h3>Why?</h3>
+                <p>It's fun, and I couldn't find anything to do stuff like this for Bedrock Edition.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const INSTR_ROUND_OFF = 5;
+        const TIMER_TAG = 'music';
+        const TICK_RATE = 18;
+
+        let repitched = 0;
+
+        const fetchPromises = [];
+
+        let templateFile;
+        const instruments = {};
+
+        // Template file
+
+        fetchPromises.push(fetch('./template.mcpack').then(res => {
+            if (res.status === 200 || res.status === 0) return Promise.resolve(res.blob());
+            else Promise.reject(new Error(res.statusText));
+        }).then(JSZip.loadAsync).then(zip => templateFile = zip));
+
+        // Music helpers
+
+        fetchPromises.push(fetch('./model/instruments.json').then(res => {
+            if (res.status === 200 || res.status === 0) return Promise.resolve(res.json());
+            else Promise.reject(new Error(res.statusText));
+        }).then(instrumentsFile => {
+            for (let [noteblock, midiList] of Object.entries(instrumentsFile)) {
+                midiList.forEach(midi => instruments[midi] = noteblock);
+            }
+        }));
+
+        function midiToPitch(midi) {
+            // Expect midi between 0 and 127
+
+            // Below octave 3, repitch up
+            if (midi < 36) {
+                midi = (midi % 12) + 36;
+                repitched++;
+            }
+
+            // Above octave 96, repitch down
+            if (midi > 96) {
+                midi = 84 + (midi % 12);
+                repitched++;
+            }
+
+            return (0.5 * Math.pow(2, (-54 + midi)/12)).toFixed(INSTR_ROUND_OFF);
+        }
+
+        function noteToCommand(note, instrument) {
+            const tick = Math.round(note.time * TICK_RATE);
+            return `playsound ${instrument} @a[scores={${TIMER_TAG}=${tick}}] 0 25600 0 ${note.volume} ${note.pitch} ${note.volume}`;
+        }
+
+        // Midi parsing and command generation
+
+        function generateMusic(midiData, instrumentData) {
+            const midi = new Midi(midiData);
+
+            const possibleTracks = midi.tracks.filter(track => track.instrument.number in instrumentData);
+
+            const commands = possibleTracks.map(track => {
+                track.minecraft = {};
+
+                track.minecraft.instrument = instrumentData[track.instrument.number]
+                track.minecraft.notes = track.notes.map(note => ({
+                    time: note.time.toFixed(INSTR_ROUND_OFF),
+                    volume: note.velocity.toFixed(INSTR_ROUND_OFF),
+                    pitch: midiToPitch(note.midi)
+                }));
+
+                track.minecraft.commands = track.minecraft.notes.map(note => {
+                    return noteToCommand(note, track.minecraft.instrument);
+                });
+
+                return track;
+            }).reduce((allCommands, track) => {
+                allCommands.push(...track.minecraft.commands);
+
+                return allCommands;
+            }, []);
+
+            const finalTick = Math.round(midi.duration * TICK_RATE);
+
+            commands.push(`scoreboard players reset @a[scores={${TIMER_TAG}=${finalTick}..}] ${TIMER_TAG}`);
+
+            // Split files
+
+            const outputFunctions = [];
+
+            while (commands.length > 0) {
+                const commandSegment = commands.splice(0, 10000);
+
+                outputFunctions.push(commandSegment);
+            };
+
+            // Return packaged results
+
+            return {
+                repitched,
+                outputFunctions,
+                duration: finalTick,
+                parts: outputFunctions.length,
+                skipped: midi.tracks.length - possibleTracks.length
+            }
+        }
+
+        function generatePack(name, music, templateZip) {
+            music.outputFunctions.forEach((outputFunction, outputIndex) => {
+                templateZip.file(`Template/functions/NBO_${name}/${outputIndex + 1}.mcfunction`, outputFunction.join('\n'));
+            });
+
+            // Patch manifest
+
+            return templateZip.file('Template/manifest.json').async('string').then(manifestFile => {
+                manifest = JSON.parse(manifestFile);
+
+                manifest.header.name = name;
+                manifest.header.uuid = uuidv4();
+                manifest.modules.forEach(module => module.uuid = uuidv4());
+
+                templateZip.file('Template/manifest.json', JSON.stringify(manifest));
+            });
+        }
+
+        // Run
+
+        Promise.all(fetchPromises).then(() => {
+            document.getElementById('music-submit').disabled = false;
+
+            document.getElementById('music-form').addEventListener('submit', event => {
+                event.preventDefault();
+
+                const musicName = document.getElementById('music-name').value;
+                
+                if (musicName === '') {
+                    UIkit.notification({
+                        message: 'Name must not be empty.',
+                        status: 'danger',
+                        pos: 'bottom-right',
+                        timeout: 5000
+                    });
+
+                    return;
+                }
+
+                const musicNameRegex = /[A-Za-z0-9]+/g;
+
+                if (!musicNameRegex.test(musicName)) {
+                    UIkit.notification({
+                        message: 'Name should only contain alphanumeric characters.',
+                        status: 'danger',
+                        pos: 'bottom-right',
+                        timeout: 5000
+                    });
+
+                    return;
+                }
+
+                const musicFiles = document.getElementById('music-file').files;
+
+                if (musicFiles.length < 1) {
+                    UIkit.notification({
+                        message: 'A MIDI file must be selected.',
+                        status: 'danger',
+                        pos: 'bottom-right',
+                        timeout: 5000
+                    });
+
+                    return;
+                }
+
+                const musicFile = musicFiles[0];
+
+                const musicReader = new FileReader();
+
+                musicReader.onload = event => {
+                    const midiData = event.target.result;
+
+                    const music = generateMusic(midiData, instruments);
+
+                    generatePack(musicName, music, templateFile).then(() => {
+                        // Save file
+
+                        return templateFile.generateAsync({ type: 'blob' }).then(packBlob => {
+                            saveAs(packBlob, `${musicName}.mcpack`);
+
+                            document.getElementById('music-results').innerHTML = `Done.\n
+                                <b>Repitched</b>: ${music.repitched} notes
+                                <b>Duration</b>: ${music.duration} ticks at ${TICK_RATE} tps\n
+                                <b>Skipped</b>: ${music.skipped} tracks\n
+                                <b>Split</b>: ${music.parts}`;
+                        });
+                    });
+                };
+
+                musicReader.readAsArrayBuffer(musicFile);
+            });
+        });
+    </script>
+</body>
